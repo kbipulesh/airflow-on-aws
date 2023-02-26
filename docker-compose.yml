@@ -1,0 +1,125 @@
+version: '3.2'
+networks:
+  airflow:
+
+services:
+  postgres:
+    image: postgres:13
+    env_file:
+      - compose-env-variables.env
+    ports:
+      - 5432:5432
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./airflow/database/data:/var/lib/postgresql/data/pgdata
+      - ./airflow/database/logs:/var/lib/postgresql/data/log
+      - ~/.aws:/home/airflow/.aws
+    command: >
+     postgres
+       -c listen_addresses=*
+       -c logging_collector=on
+       -c log_destination=stderr
+       -c max_connections=200
+    networks:
+      - airflow
+  redis:
+    image: redis:5.0.5
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - 6379:6379
+    networks:
+      - airflow
+  webserver:
+    image: airflow:latest
+    env_file:
+      - compose-env-variables.env
+    ports:
+      - 8080:8080
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/files:/opt/airflow/files
+      - ./airflow/scripts:/opt/airflow/scripts
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ~/.aws:/home/airflow/.aws
+    depends_on:
+      - postgres
+      - redis
+    command: webserver
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /opt/airflow/airflow-webserver.pid ]"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    networks:
+      - airflow
+  flower:
+    image: airflow:latest
+    env_file:
+      - compose-env-variables.env
+    ports:
+      - 5555:5555
+    depends_on:
+      - redis
+    volumes:
+      - ./airflow/logs:/opt/airflow/logs
+    command: celery flower
+    networks:
+      - airflow
+  scheduler:
+    image: airflow:latest
+    env_file:
+      - compose-env-variables.env
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/files:/opt/airflow/files
+      - ./airflow/scripts:/opt/airflow/scripts
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ~/.aws:/home/airflow/.aws
+    command: scheduler
+    networks:
+      - airflow
+  worker:
+    build: .
+    image: airflow:latest
+    env_file:
+      - compose-env-variables.env
+    expose:
+      - 25
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/files:/opt/airflow/files
+      - ./airflow/scripts:/opt/airflow/scripts
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ~/.aws:/home/airflow/.aws
+    command: worker
+    depends_on:
+      - scheduler
+    networks:
+      - airflow
+  initdb:
+     image: airflow:latest
+     env_file:
+       - compose-env-variables.env
+     volumes:
+       - ./airflow/dags:/opt/airflow/dags
+       - ./airflow/logs:/opt/airflow/logs
+       - ./airflow/plugins:/opt/airflow/plugins
+       - ./airflow/files:/opt/airflow/files
+       - ./airflow/scripts:/opt/airflow/scripts
+       - /var/run/docker.sock:/var/run/docker.sock
+       - ~/.aws:/home/airflow/.aws
+     entrypoint: /bin/bash
+     command: -c "airflow db init"
+     depends_on:
+       - redis
+       - postgres
+     networks:
+       - airflow
